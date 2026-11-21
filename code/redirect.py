@@ -8,9 +8,17 @@ rend compte de rien : il lit/écrit toujours sur 0 et 1.
 """
 import contextlib
 import os
+import shlex
 import sys
 
 REDIR_OPS = ("<", ">", ">>")
+
+
+def tokenize(segment):
+    """Découpe en mots en isolant les opérateurs < > >> (même sans espaces)."""
+    lexer = shlex.shlex(segment, posix=True, punctuation_chars="<>")
+    lexer.whitespace_split = True
+    return list(lexer)
 
 
 def parse_redirections(argv):

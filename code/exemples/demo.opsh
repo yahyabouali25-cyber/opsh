@@ -1,0 +1,31 @@
+# demo.opsh - script de démonstration pour opsh
+say === Variables ===
+NOM=Yahya
+say Bonjour $NOM
+
+say === Boucle for ===
+for i in 1 2 3
+do
+  say compteur: $i
+done
+
+say === Boucle while ===
+n=0
+while test $n -lt 3
+do
+  say n vaut $n
+  n=$(expr $n + 1)
+done
+
+say === Condition if ===
+say contenu > fichier_test.txt
+if test -f fichier_test.txt
+then
+  say le fichier existe
+else
+  say le fichier n existe pas
+fi
+del fichier_test.txt
+
+say === Pipe dans un script ===
+list -> wc -l

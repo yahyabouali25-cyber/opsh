@@ -6,6 +6,7 @@ Chaîne de traitement :
   expand -> découpage par '->' -> resolve_alias -> redirections -> run_pipeline
 """
 import atexit
+import sys
 import readline  # noqa: F401 - active les flèches / l'édition de ligne
 import shlex
 
@@ -13,7 +14,8 @@ import completion
 import history
 from executor import run_pipeline
 from expand import expand, handle_export, set_executor
-from script import load_rc
+from redirect import tokenize
+from script import load_rc, run_script
 from signals_handler import setup_signals
 from state import state
 
@@ -24,13 +26,6 @@ def parse_line(line):
     """'show f.txt -> wc -l' => [['show','f.txt'], ['wc','-l']]"""
     segments = [seg.strip() for seg in line.split("->")]
     return [tokenize(seg) for seg in segments if seg]
-
-
-def tokenize(segment):
-    """Découpe en mots en isolant les opérateurs < > >> (même sans espaces)."""
-    lexer = shlex.shlex(segment, posix=True, punctuation_chars="<>")
-    lexer.whitespace_split = True
-    return list(lexer)
 
 
 def execute_line(line):
@@ -57,6 +52,12 @@ def execute_line(line):
 def main():
     setup_signals()
     set_executor(execute_line)      # pour $(...) : expand doit pouvoir exécuter
+
+    # Mode script :  python3 opsh.py script.opsh
+    if len(sys.argv) > 1:
+        sys.exit(run_script(sys.argv[1], execute_line))
+
+    # Mode interactif
     history.load()                  # historique de la session précédente
     completion.setup()              # touche Tab
     atexit.register(history.save)   # sauvegarde à la sortie
