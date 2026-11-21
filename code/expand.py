@@ -5,7 +5,8 @@ Règles (comme Bash) :
   - dans 'apostrophes simples' : AUCUNE expansion
   - dans "guillemets doubles" ou sans guillemets : expansion
   - \$ : le dollar est protégé (littéral)
-  - $(...) est laissé tel quel (jalon 5)
+  - $(commande) et `commande` : la commande est exécutée et sa SORTIE
+    remplace l'expression (jalon 5)
 
 Deux sortes de variables :
   - variable du SHELL  : VAR=valeur         -> visible seulement dans opsh
@@ -14,8 +15,19 @@ Deux sortes de variables :
 """
 import os
 import re
+import signal
+import sys
 
 from state import state
+
+# Fonction qui exécute une ligne de commande (fournie par opsh.py).
+# On la reçoit de l'extérieur pour éviter un import circulaire.
+_executor = None
+
+
+def set_executor(fn):
+    global _executor
+    _executor = fn
 
 NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 ASSIGN_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.DOTALL)
@@ -36,6 +48,47 @@ def set_var(name, value):
         state["vars"][name] = value
 
 
+def command_output(cmd):
+    """Exécute 'cmd' et retourne ce qu'elle a AFFICHÉ (stdout).
+
+    Principe (c'est un pipe, comme au jalon 3) :
+      1. on crée un tuyau (os.pipe)
+      2. on fait un fork : le fils branche sa sortie (1) sur le tuyau
+         et exécute la commande avec le shell lui-même
+      3. le père lit le tuyau jusqu'à la fin (EOF), puis waitpid
+    """
+    if _executor is None:
+        return ""
+    r, w = os.pipe()
+    # on bloque SIGCHLD pour que le gestionnaire ne récolte pas ce fils
+    old_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGCHLD})
+    pid = os.fork()
+    if pid == 0:
+        # --- fils ---
+        signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
+        os.close(r)
+        os.dup2(w, 1)            # stdout -> tuyau
+        os.close(w)
+        status = 0
+        try:
+            _executor(cmd)
+            status = state["last_status"]
+        except SystemExit as e:
+            status = e.code or 0
+        except Exception:
+            status = 1
+        sys.stdout.flush()
+        os._exit(status)
+    # --- père ---
+    os.close(w)                  # sinon on ne verrait jamais la fin du flux
+    with os.fdopen(r, "r", errors="replace") as f:
+        data = f.read()
+    os.waitpid(pid, 0)
+    signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
+    # comme Bash : on retire les retours à la ligne finaux
+    return data.rstrip("\n").replace("\n", " ")
+
+
 def expand(line: str) -> str:
     """Remplace $VAR, ${VAR}, $?, $!, $$ dans la ligne."""
     out = []
@@ -54,6 +107,14 @@ def expand(line: str) -> str:
             in_double = not in_double
             out.append(c)
             i += 1
+        elif c == "`" and not in_single:
+            end = line.find("`", i + 1)
+            if end == -1:                # backtick jamais fermé
+                out.append(c)
+                i += 1
+            else:
+                out.append(command_output(line[i + 1:end]))
+                i = end + 1
         elif c == "\\" and not in_single and i + 1 < n and line[i + 1] == "$":
             out.append("\\$")            # $ protégé : shlex enlèvera le \
             i += 2
@@ -77,12 +138,27 @@ def expand(line: str) -> str:
                 else:
                     out.append(get_var(line[i + 2:end]))
                     i = end + 1
+            elif nxt == "(":
+                # $( ... ) avec parenthèses imbriquées
+                depth, j = 1, i + 2
+                while j < n and depth > 0:
+                    if line[j] == "(":
+                        depth += 1
+                    elif line[j] == ")":
+                        depth -= 1
+                    j += 1
+                if depth != 0:           # parenthèse jamais fermée
+                    out.append(c)
+                    i += 1
+                else:
+                    out.append(command_output(line[i + 2:j - 1]))
+                    i = j
             else:
                 m = NAME_RE.match(line, i + 1)
                 if m:                    # $NOM
                     out.append(get_var(m.group(0)))
                     i = m.end()
-                else:                    # $( ... ) ou $ seul : inchangé
+                else:                    # $ seul : inchangé
                     out.append(c)
                     i += 1
         else:

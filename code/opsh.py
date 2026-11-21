@@ -5,12 +5,15 @@ Programme principal (Personne A) : assemble les modules.
 Chaîne de traitement :
   expand -> découpage par '->' -> resolve_alias -> redirections -> run_pipeline
 """
+import atexit
 import readline  # noqa: F401 - active les flèches / l'édition de ligne
 import shlex
 
+import completion
 import history
 from executor import run_pipeline
-from expand import expand, handle_export
+from expand import expand, handle_export, set_executor
+from script import load_rc
 from signals_handler import setup_signals
 from state import state
 
@@ -53,6 +56,11 @@ def execute_line(line):
 
 def main():
     setup_signals()
+    set_executor(execute_line)      # pour $(...) : expand doit pouvoir exécuter
+    history.load()                  # historique de la session précédente
+    completion.setup()              # touche Tab
+    atexit.register(history.save)   # sauvegarde à la sortie
+    load_rc(execute_line)           # ~/.opshrc
     while True:
         try:
             line = input(PROMPT)
