@@ -10,7 +10,7 @@ import shlex
 
 import history
 from executor import run_pipeline
-from expand import expand
+from expand import expand, handle_export
 from signals_handler import setup_signals
 from state import state
 
@@ -40,8 +40,15 @@ def execute_line(line):
     if background:
         line = line[:-1].strip()
     commands = parse_line(line)
-    if commands:
-        state["last_status"] = run_pipeline(commands, background)
+    if not commands:
+        return
+    # VAR=valeur et export : doivent agir dans le shell lui-même (comme 'go')
+    if len(commands) == 1 and not background:
+        status = handle_export(commands[0])
+        if status is not None:
+            state["last_status"] = status
+            return
+    state["last_status"] = run_pipeline(commands, background)
 
 
 def main():
